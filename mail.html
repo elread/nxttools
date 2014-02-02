@@ -74,7 +74,7 @@
       if (response.transactionIds && response.transactionIds.length > 0 ) {
         if (cntTransactions != response.transactionIds.length) {
           cntTransactions = response.transactionIds.length;
-          document.getElementById("log5").innerHTML = cntTransactions;
+          //document.getElementById("log5").innerHTML = cntTransactions;
           clearInterval(RefreshInterval);
           updateMessage(response.transactionIds);
         }
