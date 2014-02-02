@@ -1,0 +1,464 @@
+<!--
+    NXT Mail
+    MIT License, Copyright (C) <2013> <OSM, https://bitcointalk.org/index.php?action=profile;u=226660>
+    
+    usage: 
+      place mail.html in NXT directory ...nxt\webapps\root\
+      use address http://localhost:7874/mail.html
+-->
+<html lang="mul">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <title>NXT Mail</title>
+  <link href="icon.png" rel="icon" type="image/png">
+
+<script type="text/javascript">
+  var PublicAccountId = getCookie("PublicAccountId");
+  var requestType     = "nxt?requestType=";
+  var DefaultFee      = 1;
+  var DefaultDeadline = 15;
+  var HexConvertType  = getCookie("HexConvertType");
+  var IntervalMs      = 1*60000; //1 min.
+  var MaxTransaction  = 3000
+
+  if (!in_array(HexConvertType, ["ASCII", "UTF-8"])) {HexConvertType="UTF-8"}
+  
+  var MapMessages     = new Array();
+  var MapMessageIDs   = new Array();
+  var cntMessages     = 0;
+  var cntTransactions = 0;
+  var tag             = 0;
+  var UpdateInterval, RefreshInterval;
+
+  function onLoad() {
+    onresize();
+    var element = document.getElementById("ShowAccountID");
+    if (in_array(typeof PublicAccountId, ["number","string"]) && PublicAccountId != "") {
+      updateTransaction();
+    } 
+    element.innerHTML = PublicAccountId;
+  }
+
+  function in_array(value, array) {
+    for(var i = 0; i < array.length; i++) if(array[i] == value) return true;
+    return false;
+  }
+  
+  function setCookie( name, value, expires, path, domain, secure ) {
+    var today = new Date();
+    today.setTime( today.getTime() );
+    if ( expires ) { expires = expires * 1000 * 60 * 60 * 24; }
+    var expires_date = new Date( today.getTime() + (expires) );
+    document.cookie = name+'='+escape( value ) +
+    ( ( expires ) ? ';expires='+expires_date.toGMTString() : '' ) +
+    ( ( path )    ? ';path=' + path : '' ) +
+    ( ( domain )  ? ';domain=' + domain : '' ) +
+    ( ( secure )  ? ';secure' : '' );
+  }
+  function getCookie( name ) {
+    var start = document.cookie.indexOf( name + '=' );
+    var len = start + name.length + 1;
+    if ( ( !start ) && ( name != document.cookie.substring( 0, name.length ) ) ) {
+      return null;
+    }
+    if ( start == -1 ) return null;
+    var end = document.cookie.indexOf( ';', len );
+    if ( end == -1 ) end = document.cookie.length;
+    return unescape( document.cookie.substring( len, end ) );
+  }
+
+  function updateTransaction() {
+    //tag++;
+    //document.getElementById("log5").innerHTML = tag;
+    sendRequest("getAccountTransactionIds&account="+PublicAccountId+"&timestamp=0", function(response) {
+      if (response.transactionIds && response.transactionIds.length > 0 ) {
+        if (cntTransactions != response.transactionIds.length) {
+          cntTransactions = response.transactionIds.length;
+          document.getElementById("log5").innerHTML = cntTransactions;
+          clearInterval(RefreshInterval);
+          updateMessage(response.transactionIds);
+        }
+      } else { 
+        alert("Error: "+response.errorDescription + " ("+response.errorCode+")");
+      }
+    } );
+  }
+  
+  function updateMessage(responseTransactionIds) {
+    MapMessages   = new Array()
+    var messageId = 0
+    tag           = 0;
+    cntMessages   = 0;
+    createTable("tResponse");
+    for (var i=cntTransactions-1; i>=0 && i>cntTransactions-MaxTransaction; i--) {
+      sendRequest("getTransaction&transaction="+responseTransactionIds[i], function(response) {
+        document.getElementById("btnSearch").disabled = false;
+        if (response.type == 1 && response.subtype == 0 && response.attachment && response.attachment.message) {
+          MapMessages.push({id: messageId++, sender: response.sender, recipient: response.recipient, time: response.timestamp,message: hex2text(response.attachment.message)});
+          MapMessages.sort(sortMessages);
+        } 
+      } );
+    }
+    clearInterval(UpdateInterval)
+    UpdateInterval = setInterval('ticks()', 100); 
+  }
+
+  function ticks () {
+    var addTag = 0;
+    if (cntMessages != MapMessages.length) {
+      addTag++;
+      cntMessages  = MapMessages.length;
+      createTable("tResponse");
+      addRow("tResponse", false);
+      document.getElementById("log2").innerHTML = cntMessages;
+    }
+    tag++;
+    //document.getElementById("log4").innerHTML = tag;
+    if (tag == 50+addTag) { 
+      clearInterval(UpdateInterval)
+      RefreshInterval = setInterval('updateTransaction()', IntervalMs);
+    }
+  }
+  
+  function sortMessages(a, b) {return b.time - a.time; }
+
+  function beginSearch() {
+    var find = document.getElementById("inpSearch").value.toUpperCase()
+    MapMessageIDs = new Array()
+    if (find == "") {
+      document.getElementById("btnSearch").disabled = true;
+      cntTransactions = 0;
+      document.getElementById("log2").innerHTML = cntMessages;
+      updateTransaction();
+    } else {
+      clearInterval(RefreshInterval)
+      var cntSearches = 0;
+      for (var i=0; i<MapMessages.length; i++) {
+        var message = MapMessages[i];
+        var upcasemessage = message.message.toUpperCase()
+        if (find == message.sender || find == message.recipient || upcasemessage.indexOf(find) !== -1) {
+          MapMessageIDs[cntSearches] = message.id
+          cntSearches++;
+        }
+      }
+      createTable("tResponse");
+      addRow("tResponse", true)
+      document.getElementById("log2").innerHTML = cntSearches;
+    }
+  }
+
+  function createTable(table) {
+    var container = document.getElementById("TableArea")
+    container.innerHTML="<table id='"+table+"' class='tableResponse'><tbody></tbody></table>"
+    return container.firstChild 
+   //del first document.getElementById("tResponse").deleteRow(1);
+   //del last  document.getElementById("tResponse").deleteRow(tResponse.rows.length-1);   
+   //document.getElementById('tResponse').removeChild(document.getElementById('tResponse').lastChild);
+   //return false;
+  }
+
+  function addRow(table, filtr){
+    for (var i=0; i<MapMessages.length; i++) {
+      var message = MapMessages[i];
+      if (filtr && !in_array(message.id, MapMessageIDs) ) continue;
+      
+      var tbody = document.getElementById
+      (table).getElementsByTagName("TBODY")[0];
+      var row = document.createElement("TR");
+        
+      var td1 = document.createElement("TD")
+      if ( message.sender == PublicAccountId ) { 
+        td1.innerHTML = "<a href='http://87.230.14.1/nxt/nxt.cgi?action=3000&acc="+message.sender+"' target=_blank>This account</a>";
+      } else {td1.innerHTML = "<a href='javascript:showAccountDialog(&#39;"+message.sender+"&#39;);'>"+message.sender+"</a>"; }
+      row.appendChild(td1);
+
+      var td2 = document.createElement("TD");
+      if ( message.recipient == PublicAccountId ) { 
+        td2.innerHTML = "<a href='http://87.230.14.1/nxt/nxt.cgi?action=3000&acc="+message.recipient+"' target=_blank>This account</a>";
+      } else {td2.innerHTML = "<a href='javascript:showAccountDialog(&#39;"+message.recipient+"&#39;);'>"+message.recipient+"</a>"; }
+      row.appendChild(td2);
+
+      var td3 = document.createElement("TD")
+      td3.appendChild(document.createTextNode(formatTimestamp(message.time)))
+      row.appendChild(td3);
+
+      var td4 = document.createElement("TH")
+      td4.appendChild(document.createTextNode(message.message))
+      row.appendChild(td4);
+
+      var td5 = document.createElement("TD")
+      td5.innerHTML = "<a href='javascript:sendMessageDialog(&#39;"+message.sender+"&#39;);'>Send a message</a>"
+      row.appendChild(td5);
+
+      tbody.appendChild(row);
+    }
+  }
+  function sendRequest(requestParameters, callback) {
+    var request = new XMLHttpRequest();
+    //request.timeout = 30000;
+    request.open("GET", "nxt?requestType=" + requestParameters + "&" + Math.random(), true);
+    request.onreadystatechange = function() {
+      if (this.readyState != 4) return;
+      if (this.status == 200) {
+        var response = JSON.parse(this.responseText);
+        callback(response);
+        //document.getElementById("log5").innerHTML = this.responseText;        
+      } else {
+        alert(this.status);
+      }
+    };
+    request.send();
+  }
+
+  function formatTimestamp(timestamp) {
+    return (new Date(Date.UTC(2013, 10, 24, 12, 0, 0, 0) + timestamp * 1000)).toLocaleString();
+  }
+  
+/*Modal Window*/
+  function showAccountDialog(id) {
+    showDialog("Set account ID", "<p style='margin: 40 0'></p>Account ID:<br />"+
+    "<input id='inputAccID' style='width: 95%; height: 30' maxlength='20' type='text' placeholder='Account ID'><br />"+
+    "<br />Method encode/decode messages:<br />"+
+    "<input type='radio' name='hex' id='ASCII'>ASCII (it's used by default in the &quotmessage.html&quot)<br />"+
+    "<input type='radio' name='hex' id='UTF-8'>UTF-8 (multilanguage support)<br />"+    
+    "<button id='btnSaveAcc' style='width: 95%; height: 30; margin: 40 0;' onclick='SaveAccountID()'>Save</button>");
+    document.getElementById(HexConvertType).checked = true;
+    var input = document.getElementById("inputAccID");
+    input.value = id;
+    if (input != null) { input.focus(); }
+  }
+  function SaveAccountID() {
+    var tempAccountID = document.getElementById("inputAccID").value;
+    document.getElementById("btnSaveAcc").disabled = true;
+    sendRequest("getAccountTransactionIds&account="+tempAccountID+"&timestamp=0", function(response) {
+      document.getElementById("btnSaveAcc").disabled = false;
+      if (response.transactionIds && response.transactionIds.length > 0 ) {
+        PublicAccountId = tempAccountID;
+        document.getElementById("ShowAccountID").innerHTML = PublicAccountId;
+        setCookie("PublicAccountId",PublicAccountId,1,"","")
+        var radios = document.getElementsByName("hex");
+        for (var i = 0; i < radios.length; i++) if (radios[i].checked) {
+          HexConvertType = radios[i].id;
+          break;
+        }
+        setCookie("HexConvertType", HexConvertType, 1,"","")
+        cntTransactions=response.transactionIds.length;
+        cntMessages=0;
+        document.getElementById("log2").innerHTML = cntMessages;
+        closeDialog();        
+        updateMessage(response.transactionIds);
+      } else { 
+        alert("Error: "+response.errorDescription + " ("+response.errorCode+")"); 
+      }
+    } );
+  }
+  
+  function sendMessageDialog(recipient) {
+    showDialog("Send a message", "<p style='margin: 0 0'></p>Recipient<br />"+
+    "<input id='inputRecipID' style='width: 95%; height: 25' maxlength='20' type='text' placeholder='Account ID'><br />"+
+    "<p style='margin: 5 0'></p>Message"+
+    "<input id='showCountChar' style='background-color: #C0C0C0; width: 30%; height: 20; margin-left: 51%; text-align: right; border-style: solid; border-width: 1px' value='1000' readonly='readonly';><br />"+
+    "<textarea id='textMessage' style='width: 95%;' rows='7' oninput=adjustCountChar()></textarea>"+
+    "<input id='inputSecret' style='width: 95%; height: 25; margin: 5 0;' maxlength=100 type='password' placeholder='Secret phrase'><br />"+    
+    "<input type='submit' id='buttonSendMess' style='width: 95%; height: 30; margin: 5 0;' onclick='SendMessage()'></input>");
+    document.getElementById('buttonSendMess').value = "SEND  (fee: "+DefaultFee+" nxt)";
+    document.getElementById("inputRecipID").value = recipient;
+    var input = document.getElementById("textMessage");
+    if (input != null) { input.focus(); }
+  }  
+  function adjustCountChar(){
+    var CharLeft = 1000 - document.getElementById("textMessage").value.length;
+    document.getElementById("showCountChar").value = CharLeft;
+  }
+  function SendMessage() {
+    document.getElementById('buttonSendMess').disabled = true;
+    document.getElementById('buttonSendMess').value = "Submitting... Please wait.";
+    var textMessage = encodeURIComponent(text2hex(document.getElementById("textMessage").value));
+    
+    sendRequest("sendMessage"+
+      "&secretPhrase="+encodeURIComponent(document.getElementById("inputSecret").value)+
+      "&recipient="+document.getElementById("inputRecipID").value+
+      "&fee="+DefaultFee+
+      "&message="+textMessage+
+      "&deadline="+DefaultDeadline, function(response) {
+      if (response.errorCode > 0) {
+        alert("Error: "+response.errorDescription + " ("+response.errorCode+")");
+        document.getElementById('buttonSendMess').disabled = false;
+        document.getElementById('buttonSendMess').value = "Send";
+      } else {
+        cntTransactions = 0;
+        document.getElementById("log2").innerHTML = cntMessages;
+        updateTransaction();
+        closeDialog(); 
+      }
+    } );
+  }
+    
+  function showDialog(title, content, oncloseFunction) {
+    document.getElementById("dialogTitle").innerHTML = title;
+    document.getElementById("dialogContent").innerHTML = content;
+    document.getElementById("dialogClose").onclick = oncloseFunction ? oncloseFunction : closeDialog;
+    document.getElementById("interfaceDisabler").style.display = "block";
+  }
+  function closeDialog() {
+    document.getElementById("interfaceDisabler").style.display = "none";
+  }
+
+  onresize = function()  {
+    var bodyWidth  = document.body.clientWidth;  //document.documentElement.windowWidth;
+    var bodyHeight = document.body.clientHeight; //document.documentElement.windowHeight;
+    document.getElementById('TableArea').style.height = bodyHeight - 180
+  }
+  
+// Crypt & convert
+function trim_text(text) {
+    var result = "";
+    var i = 0;
+    if (text.length > 2 && text[0] == "0" && text[1] == "x") i = 2;
+    for (; i < text.length; i++) {
+        if (text[i] != " " && text[i] != "\n" && text[i] != "\r" && text[i] != "\t") result += text[i];
+    }
+    return result;
+}
+function hex2text(hex) {
+  switch (HexConvertType) {
+    case "UTF-8":
+      var ch     = 0;
+      var result = "";
+      hex = trim_text(hex);
+      for (var i = 4; i <= hex.length; i += 4) {
+        ch = parseInt(hex.substring(i - 4, i), 16);
+        ch = String.fromCharCode("0x" + ch.toString(16));
+        result += ch;
+      }
+      return result;
+    case "ASCII":
+      var hex = hex.toString();//force conversion
+      var str = '';
+      for (var i = 0; i < hex.length; i += 2)
+        str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+      return str;
+    case "BASE64":
+      break
+  }
+}
+
+function text2hex(text) {
+  switch (HexConvertType) {
+    case "UTF-8":
+      var ch = 0;
+      var result = "";
+      for (var i = 0; i < text.length; i++) {
+        ch = text.charCodeAt(i).toString(16);
+        while (ch.length < 4) ch = "0" + ch;
+        result += ch;
+      }
+      return result;
+    case "ASCII":
+
+      var hex = "";
+      for(var i=0;i<text.length;i++) {
+        hex += ''+text.charCodeAt(i).toString(16);
+      }
+      return hex;
+    case "BASE64":
+      break
+  }
+}
+</script>
+
+<style type="text/css">
+<!--
+  div {position: absolute;}
+  body         {background-color: #C0C0C0; color: #000; font-family: Tahoma; font-size: 10pt; margin: 0; padding: 0;}
+  .bar         {background-color: #000; height: 50px; width: 100%;}
+  
+  .SetAccountID {background-image: url(data:image/png;base64,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); cursor: pointer; height: 30px; left: 50%; left: 15px; top: 10px; width: 30px;}
+  .ShowAccountID {color: #0F0; cursor: default; font-weight: bold; height: 20px; left: 55px; line-height: 20px; top: 17px; width: 160px;}  
+  .tools {left: 30%; margin-top: 10px;}
+
+/*Modal Window */
+  .dialog {background-color: #C0C0C0; border: 1px solid #000; cursor: default; height: 320px; left: 50%; margin: -151px -201px; top: 50%; width: 380px;}
+  .dialogHeader  {background-color: #000; height: 30px; left: 0; top: 0; width: 100%;}
+  .dialogContent {height: 250px; left: 10px; top: 40px; width: 380px;}
+  .dialogTitle   {color: #FFF; cursor: default; font-weight: bold; height: 20px; left: 10px; line-height: 20px; top: 5px; width: 350px;}
+  .close {background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAkRJREFUeNqkU8Fr03AU/po0TTpb66BrdRuuTHZSKUM3JwNXNi87e1A86JTB/oLBDh704KleBEE6hwx30X/AOVakDOtA6KkHD52yiThcO1zaLs2aNPH3flmCAW978IXf73vv+/LyeAnYto2TRJAemYdFRCJRxGJnoCjhlCAIc4yeZhg6rqswrFqWldP11raqHqDZbKDwetwxcIMVzAg4ymaGI/Hrl0+ht8dJ/6qa6c3yYbpQas2ymnlGLfs6cMVhSc8t3B8Ipc6F4Hxah+fOJwMYOBvF2CU5/nRpJ6daFlwTgR6GYaQsU8suzPSF+nsETDwowjRNH4ijHNVQLWk8g0ajOTc1Gov3J0SM3F5HvV7H6J28J6YzcZSjmsmRWJw0nkGrpU9PjSWoE3x5e5PuHMO3PnC497WXV7G19Q3XLipc4xlYljCU6u2iObBuGiiuTBDnw6c3N7C3VwWNJtktco03xGCwC7CpkyOoaoMbce6fqNX+MC7EzzZ7r5vnHSjK6Urlh4bDwzZEMYS7j/aJ84E4SVI4dmuOxjMIh7tXN0oGLRHuPdbozrGxnOZw75STZQWbZUfjGchyNFcoBWpVNYz84gVmFMN6bpBtm8FBZ+Lyi4PY3ZfxuSzVSOMZiKK03TaV+WcrZruyY+H9iyQ0zWbfqXDQmbiv3y08f4c21ZLGt4m0WdUDG09e6dnMFSs+npbQlxD4cH9WOyiu6SiUjJqm275VDtDKTs7+5sM7Dtqw//5MDNQ2f3On08bHpaRjcJL4K8AA464ovJBN7doAAAAASUVORK5CYII=); cursor: pointer; height: 15px; left: 100%; margin-left: -25px; top: 8px; width: 15px;}
+  .interfaceDisabler {background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQIHWNgOAAAAMMAwVW5+Y8AAAAASUVORK5CYII=); cursor: not-allowed; display: none; height: 100%; left: 0; top: 0; width: 100%;}
+
+/* Table*/
+  .tableBar  {background-color: #CCC; height: 50px; width: 98%; margin: auto; position: relative;}
+  .TableArea {background-color: #CCC;               width: 98%; margin: auto; position: relative; overflow: auto; margin-bottom:-5px}
+  table a {color: #3A4856; text-decoration: none; border-bottom: 1px solid #C6C8CB; }
+  table a:visited {color: #777;}
+  table a:hover {color: #000;}
+  table tbody tr:hover {background: #EAECEE; color: #111;}
+  table tbody th {text-align: left; padding: 10px; }
+  table tbody td {text-align: left; padding: 10px; width: 140px;}
+  table thead th {text-align: left; cursor:pointer; cursor:hand;}
+  .c1 {width: 140px; text-align: left;}
+  .tableResponse {width:100%; font: 85% "Lucida Grande", "Lucida Sans Unicode", "Trebuchet MS", sans-serif;padding: 0; border-collapse: collapse; color: #333; background: #F3F5F7; margin-top: 0; text-align: left;}
+  /* 9AA5B0  838C96                      */
+  .footer {background: #838C96; height: 50px; width: 98%; margin: auto; position: relative;}
+  table tfoot td, table tfoot th, table tfoot tr {text-align: left; font: 100%  "Lucida Grande", "Lucida Sans Unicode", "Trebuchet MS", sans-serif; text-transform: uppercase; background: #838C96; padding: 10px;}
+-->
+</style>
+</head>
+<body onload="onLoad()">
+
+<div class="bar" style="top: 0;">
+  <div id="SetAccountID" class="SetAccountID" title="Setup AccountID" onclick="showAccountDialog(PublicAccountId)"></div>
+  <div id="ShowAccountID" class="ShowAccountID" title="Account"></div>
+  <div id="InputSearch" class="tools" >  
+    <input id="inpSearch" size= "50"% maxlength="500" type="text" placeholder="Search something" style="height:30px; font: 110% 'Lucida Grande', 'Lucida Sans Unicode', 'Trebuchet MS', 'sans-serif'; ">
+    <button id="btnSearch" onclick="beginSearch();" style="height:30px";>Search</button>
+    <button id="btnNew" onclick="sendMessageDialog('')" style="height:30px">New message</button>    
+  </div>
+</div>
+ 
+<div class="tableBar" style="top: 60;">
+
+<table id="tBarResponse" style='width:100%; background: #3A4856; padding: 15px; color: #fff; font: 90% sans-serif;'>
+  <thead>
+      <tr>
+        <th class='c1'>Author</th>
+        <th class='c1'>&nbsp;&nbsp;&nbsp;&nbsp;Recipient</th>
+        <th class='c1'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Time</th>
+        <th>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Message</th>
+        <th class='c1'>&nbsp;&nbsp;Action</th>
+      </tr>
+    </thead>
+  </table>
+</div>
+
+<div id='TableArea' class='TableArea' style='top: 65'></div>
+
+<div class="footer" style="bottom: -75;">
+  <div id="Donations" style="right:5px; bottom:5px; color: #EAECEE; font-size: 8pt;">If you find this service useful, please consider making a <a style="color: #EAECEE" href='javascript:alert(&#39;Donations are a great motivation for me to keep updating this tool.\n\n\tPlease send Nxt to ID:10260372437324455574&#39;);'>donation</a> or <a style="color: #EAECEE" href='javascript:sendMessageDialog(&#39;10260372437324455574&#39;);'>contact me</a>.</div>
+  
+
+  <table id="tFooResponse">
+    <tfoot>
+      <tr>
+        <th id="log1">TOTAL</th>
+        <th id="log2">0</th>
+        <td id="log3">messages</td>
+        <td id="log4"></td>
+        <td id="log5"></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+
+  <div id="interfaceDisabler" class="interfaceDisabler">
+    <div class="dialog">
+      <div class="dialogHeader">
+        <div id="dialogTitle" class="dialogTitle"></div>
+        <div id="dialogClose" class="close" title="Close"></div>
+      </div>
+      <div id="dialogContent" class="dialogContent"></div>
+    </div>
+  </div>
+  
+</body>
+</html>
