@@ -30,7 +30,7 @@ If WScript.Arguments(0) <> "uac" then
 Else
     err.Clear
     on error goto 0
-    WScript.Echo "NRS Start/Stop; Version: 0.1.0;"&VbCrLf
+    WScript.Echo "NRS Start/Stop; Version: 0.1.1;"&VbCrLf
     
 
     ' Check path
@@ -45,6 +45,7 @@ Else
     ' Main
     dim ActualVersion
     dim PIDJava : PIDJava = isProcess(JavaEXE,"start.jar")
+
     if  PIDJava > 0 then
         if CheckUpdate then
             call UpdateVersion
@@ -112,7 +113,21 @@ function CheckUpdate
     if not response = "" then CurrentVersion = stunParser(response,"version")
     toLog("Current version:   "&CurrentVersion)
     toLog("Last block number: "&stunParser(response,"numberOfBlocks"))
-    if ActualVersion > CurrentVersion and AutoUpdate then CheckUpdate = true else CheckUpdate = false
+    if StrToInt(ActualVersion) > StrToInt(CurrentVersion) and AutoUpdate then CheckUpdate = true else CheckUpdate = false
+end function
+
+function StrToInt (ByVal str)
+    StrToInt = 0
+    if TypeName(str) = "String" then
+        StrToInt  = mid(Replace(trim(str), ".", "")+String(9, "0"),1,9)
+        on error resume next
+        StrToInt = CLng(StrToInt)
+        if Err.Number <> 0 then
+            StrToInt = 0
+            err.clear
+            on error goto 0
+        end if
+    end if
 end function
 
 sub UpdateVersion
@@ -120,7 +135,7 @@ sub UpdateVersion
     call Download("http://download.nxtcrypto.org/nxt-client-"&ActualVersion&".zip","nxt-client-"&ActualVersion&".zip")
 
     if MakeDirectory(ScriptFullPath&"tmp") then
-        call Extract( ScriptFullPath&"nxt-client-"&ActualVersion&".zip", ScriptFullPath&"tmp" )
+        call Extract( ScriptFullPath&"nxt-client-"&ActualVersion&".zip", ScriptFullPath&"tmp\" )
     else
         toLog("Warning! Can't create folder 'tmp'.") 
         PressAnyKey(6)
@@ -129,7 +144,7 @@ sub UpdateVersion
     dim web_xmlPath : web_xmlPath = "webapps\root\WEB-INF\web.xml"
     call xmlWorker(ScriptFullPath&"tmp\nxt\"&web_xmlPath, ScriptFullPath&web_xmlPath)
     call StopServer
-    call MoveSource(ScriptFullPath&"tmp\nxt", fso.GetParentFolderName(ScriptFullPath))
+    call MoveSource(ScriptFullPath&"tmp\nxt", ScriptFullPath) 'fso.GetParentFolderName(ScriptFullPath)
     call DelDirectory (ScriptFullPath&"tmp\")
 
 end sub
@@ -175,7 +190,7 @@ end sub
 
 sub StopServer
     toLog("Try to stop server...")
-    
+
     on error resume next
     oShell.Run """"&pathJava&""""&" -jar "&""""&ScriptFullPath&"start.jar"&""""&" STOP.PORT="&StopPort&" STOP.KEY="&StopKey&" --stop", 0, false
     if Err.Number <> 0 then DisplayErrorInfo
@@ -245,7 +260,7 @@ function isProcess (ByVal ProcessName, StartFileName)
             if posSP+posSK > 0 then
                 StopPort = mid(strCL,posSP+10,InStr(posSP, strCL, " ")-posSP-10)
                 StopKey  = mid(strCL,posSK+9,InStr(posSK, strCL, " ")-posSK-9)
-                toLog("found STOP.PORT="&StopPort&" and STOP.KEY="&StopKey&"")
+                toLog("Found STOP.PORT="&StopPort&" and STOP.KEY="&StopKey&"")
             else
               toLog("Warning! STOP.PORT and STOP.KEY not found")
             end if
@@ -313,6 +328,7 @@ end sub
 function stunParser(ByVal strJSON, ByVal srchArg)
     dim iJSON, arrJSON, posArg, posQuote, posValue
     strJSON = trim(strJSON)
+    stunParser = strJSON
     if strJSON = "" then
         exit function
     else
@@ -321,6 +337,7 @@ function stunParser(ByVal strJSON, ByVal srchArg)
             posArg = InStr(1,ucase(iJSON), """"&ucase(srchArg)&""":")
             if posArg > 0 then
                 posValue   = posArg + len(srchArg) + 3
+
                 posQuote   = InStr(posValue,iJSON, ",")
                 if posQuote = 0 then posQuote = len(iJSON)
                 stunParser = Replace(Replace(mid(iJSON, posValue), "}", ""),"""", "")
@@ -395,11 +412,13 @@ sub Extract( ByVal myZipFile, ByVal myTargetDir )
 
     On Error Resume Next
     objTarget.CopyHere objSource, 4+16+1024 '256
+
     do 
         Wscript.Sleep 100
     loop until objTarget.Items.Count > 0
 
-    Set objSubF   = objShell.NameSpace( myTargetDir +"\nxt")
+    Set objSubF   = objShell.NameSpace( myTargetDir +"nxt\")
+
     if Err.Number = 0 then toLog("Unzip "&objSubF.Items.Count&" objects")
     Set objSubF   = Nothing
     Set objTarget = Nothing
