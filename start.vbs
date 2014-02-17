@@ -6,6 +6,7 @@
 Option Explicit
 
 const AutoUpdate          = true  ' download & update actual version: true - yes; false - no
+const ForceUpdate         = false ' download & update the last version on site: true - yes; false - no
 const SilentMode          = false ' true: nonstop; false: with stops
 const UseUAC              = false ' use administrator mode: true - yes; false - no
 const MemAlocated         = ""    ' java memory configuration, e.g. "-Xms448 -Xmx480"
@@ -30,9 +31,8 @@ If WScript.Arguments(0) <> "uac" then
 Else
     err.Clear
     on error goto 0
-    WScript.Echo "NRS Start/Stop; Version: 0.1.1;"&VbCrLf
+    WScript.Echo "NRS Start/Stop; Version: 0.1.2;"&VbCrLf
     
-
     ' Check path
     dim fso : Set fso = CreateObject ("Scripting.FileSystemObject")
     dim ScriptFullPath :ScriptFullPath  = fso.GetParentFolderName(fso.GetAbsolutePathName(WScript.ScriptFullName))&"\"
@@ -46,21 +46,41 @@ Else
     dim ActualVersion
     dim PIDJava : PIDJava = isProcess(JavaEXE,"start.jar")
 
-    if  PIDJava > 0 then
-        if CheckUpdate then
-            call UpdateVersion
-        else 
+    if ForceUpdate then
+        if PIDJava > 0 then
             call StopServer
         end if
+        if LastZip() then call UpdateVersion
     else
-        call StartServer
-        if CheckUpdate then
-            call UpdateVersion
+        if  PIDJava > 0 then
+            if CheckUpdate then
+                call UpdateVersion
+            else 
+                call StopServer
+            end if
+        else
             call StartServer
+            if CheckUpdate then
+                call UpdateVersion
+                call StartServer
+            end if
         end if
     end if
     PressAnyKey(1)
 end if
+
+function LastZip
+    dim response, Pos1, Pos2
+    LastZip  = false
+    response = SendRequestHttp("http://download.nxtcrypto.org")
+    Pos2 = InStrRev(response, ".zip<")
+    if Pos2 > 0 then 
+        Pos1 = InStrRev(response, ">nxt-client-",Pos2) + 12
+        ActualVersion = mid(response,Pos1, Pos2 - Pos1)
+        toLog("Actual version:    "&ActualVersion)
+        LastZip  = true
+    end if
+end function
 
 sub StartServer
     toLog("Starting NXT...")
@@ -105,11 +125,11 @@ end sub
 
 function CheckUpdate
     dim response, CurrentVersion
-    response      = SendRequestHttp("getAliasURI&alias=nrsversion")
+    response      = SendRequestHttp(DefaultURL+"getAliasURI&alias=nrsversion")
     if not response = "" then ActualVersion = split(stunParser(response,"uri")," ")(0)
     toLog("Actual version:    "&ActualVersion)
 
-    response      = SendRequestHttp("getState")
+    response      = SendRequestHttp(DefaultURL+"getState")
     if not response = "" then CurrentVersion = stunParser(response,"version")
     toLog("Current version:   "&CurrentVersion)
     toLog("Last block number: "&stunParser(response,"numberOfBlocks"))
@@ -143,7 +163,7 @@ sub UpdateVersion
     
     dim web_xmlPath : web_xmlPath = "webapps\root\WEB-INF\web.xml"
     call xmlWorker(ScriptFullPath&"tmp\nxt\"&web_xmlPath, ScriptFullPath&web_xmlPath)
-    call StopServer
+    if not ForceUpdate then call StopServer
     call MoveSource(ScriptFullPath&"tmp\nxt", ScriptFullPath) 'fso.GetParentFolderName(ScriptFullPath)
     call DelDirectory (ScriptFullPath&"tmp\")
 
@@ -350,12 +370,12 @@ end function
 function SendRequestHttp(ByVal request)
     dim http
     Set http = CreateObject("Microsoft.XmlHttp")
-    http.open "GET", DefaultURL + request, FALSE
     
     on error resume next
+    http.open "GET", request, FALSE    
     http.send ""
     if http.Status <> 200 then
-        toLog("Server not responding")
+        toLog("Server not responding: "&Err.description)
         call PressAnyKey(6)
     end if
     if Err.Number <> 0 then DisplayErrorInfo
