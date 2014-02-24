@@ -6,7 +6,7 @@
 Option Explicit
 
 const AutoUpdate          = true  ' download & update actual version: true - yes; false - no
-const ForceUpdate         = false ' download & update the last version on site: true - yes; false - no
+const DownloadOnly        = false ' download latest version on site: true - yes; false - no
 const SilentMode          = false ' true: nonstop; false: with stops
 const UseUAC              = false ' use administrator mode: true - yes; false - no
 const MemAlocated         = ""    ' java memory configuration, e.g. "-Xms448 -Xmx480"
@@ -31,7 +31,7 @@ If WScript.Arguments(0) <> "uac" then
 Else
     err.Clear
     on error goto 0
-    WScript.Echo "NRS Start/Stop; Version: 0.1.2;"&VbCrLf
+    WScript.Echo "NRS Start/Stop; Version: 0.1.3;"&VbCrLf
     
     ' Check path
     dim fso : Set fso = CreateObject ("Scripting.FileSystemObject")
@@ -43,10 +43,10 @@ Else
     dim pathJava : pathJava  = checkJava()
         
     ' Main
-    dim ActualVersion
+    dim ActualVersion, UnzipObjCount
     dim PIDJava : PIDJava = isProcess(JavaEXE,"start.jar")
 
-    if ForceUpdate then
+    if DownloadOnly then
         if PIDJava > 0 then
             call StopServer
         end if
@@ -133,7 +133,7 @@ function CheckUpdate
     if not response = "" then CurrentVersion = stunParser(response,"version")
     toLog("Current version:   "&CurrentVersion)
     toLog("Last block number: "&stunParser(response,"numberOfBlocks"))
-    if StrToInt(ActualVersion) > StrToInt(CurrentVersion) and AutoUpdate then CheckUpdate = true else CheckUpdate = false
+    if StrToInt(ActualVersion) => StrToInt(CurrentVersion) and AutoUpdate then CheckUpdate = true else CheckUpdate = false
 end function
 
 function StrToInt (ByVal str)
@@ -151,9 +151,10 @@ function StrToInt (ByVal str)
 end function
 
 sub UpdateVersion
-    toLog("Prepare to update")
     call Download("http://download.nxtcrypto.org/nxt-client-"&ActualVersion&".zip","nxt-client-"&ActualVersion&".zip")
-
+    if DownloadOnly then exit sub
+    
+    toLog("Prepare to update")
     if MakeDirectory(ScriptFullPath&"tmp") then
         call Extract( ScriptFullPath&"nxt-client-"&ActualVersion&".zip", ScriptFullPath&"tmp\" )
     else
@@ -163,17 +164,21 @@ sub UpdateVersion
     
     dim web_xmlPath : web_xmlPath = "webapps\root\WEB-INF\web.xml"
     call xmlWorker(ScriptFullPath&"tmp\nxt\"&web_xmlPath, ScriptFullPath&web_xmlPath)
-    if not ForceUpdate then call StopServer
+    call StopServer 
     call MoveSource(ScriptFullPath&"tmp\nxt", ScriptFullPath) 'fso.GetParentFolderName(ScriptFullPath)
     call DelDirectory (ScriptFullPath&"tmp\")
 
 end sub
 
 sub DelDirectory (ByVal pathDirectory)
+    on error resume next
     if fso.FolderExists(pathDirectory) then fso.GetFolder(pathDirectory).Delete
+    if Err.Number <> 0 then DisplayErrorInfo
+    on error goto 0
 end sub 
 
 sub MoveSource (ByVal PathSource, ByVal PathTarget)
+
     dim objShell  : set objShell  = CreateObject("shell.application")
     dim objTarget : set objTarget = objShell.NameSpace(PathTarget)
     dim objSource : set objSource = objShell.NameSpace(PathSource)
@@ -182,7 +187,6 @@ sub MoveSource (ByVal PathSource, ByVal PathTarget)
     dim objFolder : set objFolder = objFso.GetFolder(PathSource)
     dim objSubF   : set objSubF   = objFolder.SubFolders
     dim objFiles  : set objFiles  = objFolder.Files
-
 
     on error resume next
     if (not objTarget is nothing) then
@@ -195,8 +199,13 @@ sub MoveSource (ByVal PathSource, ByVal PathTarget)
             objTarget.MoveHere File.path, 4+16+512
         next    
     end if
+    dim MovedObjCount : MovedObjCount = saveCnt-objSource.Items.Count
+    if UnzipObjCount <> MovedObjCount then 
+        toLog("Warning! Moved "&MovedObjCount&" of "&UnzipObjCount&" objects")
+    else
+        toLog("Moved "&MovedObjCount&" objects")
+    end if
     if Err.Number <> 0 then DisplayErrorInfo
-    toLog("Moved "&saveCnt-objSource.Items.Count&" objects")
     on error goto 0
 
     set objFso     = nothing
@@ -206,6 +215,7 @@ sub MoveSource (ByVal PathSource, ByVal PathTarget)
     set objTarget  = nothing
     set objSource  = nothing
     set objShell   = nothing
+
 end sub
 
 sub StopServer
@@ -332,9 +342,12 @@ sub xmlWorker (ByVal xmlFile, old_xmlFile)
         set newParam = newNode.childNodes(0)
         set newValue = newNode.childNodes(1)
         Set oldValue = xmlOld.selectNodes (pathNode + " [" + newParam.nodeName+"='" + newParam.text + "']/"+newValue.nodeName)(0)
-        if newValue.text <> oldValue.text then
-            newValue.text = oldValue.text
-            chngValue     = chngValue + 1
+
+        if not oldValue is nothing then
+            if newValue.text <> oldValue.text then
+                newValue.text = oldValue.text
+                chngValue     = chngValue + 1
+            end if
         end if
     Next
 
@@ -438,8 +451,8 @@ sub Extract( ByVal myZipFile, ByVal myTargetDir )
     loop until objTarget.Items.Count > 0
 
     Set objSubF   = objShell.NameSpace( myTargetDir +"nxt\")
-
-    if Err.Number = 0 then toLog("Unzip "&objSubF.Items.Count&" objects")
+    UnzipObjCount = objSubF.Items.Count
+    if Err.Number = 0 then toLog("Unzip "&UnzipObjCount&" objects")
     Set objSubF   = Nothing
     Set objTarget = Nothing
     Set objSource = Nothing
