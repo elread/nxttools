@@ -133,7 +133,7 @@ function CheckUpdate
     if not response = "" then CurrentVersion = stunParser(response,"version")
     toLog("Current version:   "&CurrentVersion)
     toLog("Last block number: "&stunParser(response,"numberOfBlocks"))
-    if StrToInt(ActualVersion) => StrToInt(CurrentVersion) and AutoUpdate then CheckUpdate = true else CheckUpdate = false
+    if StrToInt(ActualVersion) > StrToInt(CurrentVersion) and AutoUpdate then CheckUpdate = true else CheckUpdate = false
 end function
 
 function StrToInt (ByVal str)
